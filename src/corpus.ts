@@ -27,17 +27,9 @@ import type {
 const execFileP = promisify(execFile);
 
 export interface ReadCorpusOptions {
-  /** Absolute or resolvable path to the project root. */
   rootPath: string;
-  /**
-   * Files to attempt to read, relative to `rootPath`.
-   * Missing files are silently skipped (they just don't appear in `corpus.files`).
-   * Default: ["README.md", "CLAUDE.md", "package.json"].
-   */
   files?: string[];
-  /** Max bytes per file. Files larger than this are skipped. Default: 200_000. */
   maxFileSize?: number;
-  /** How many recent commits to capture in metadata.gitLog. Default: 20. */
   gitLogLimit?: number;
 }
 
@@ -45,26 +37,17 @@ const DEFAULT_FILES = ["README.md", "CLAUDE.md", "package.json"];
 const DEFAULT_MAX_FILE_SIZE = 200_000;
 const DEFAULT_GIT_LOG_LIMIT = 20;
 
-/**
- * Read a corpus from a project root on disk.
- *
- * Throws if `rootPath` does not exist or is not a directory.
- * Does NOT throw if individual files are missing or git is not available;
- * those cases produce a corpus with fewer files / no git log.
- */
 export async function readCorpus(opts: ReadCorpusOptions): Promise<Corpus> {
   const rootPath = path.resolve(opts.rootPath);
   const files = opts.files ?? DEFAULT_FILES;
   const maxFileSize = opts.maxFileSize ?? DEFAULT_MAX_FILE_SIZE;
   const gitLogLimit = opts.gitLogLimit ?? DEFAULT_GIT_LOG_LIMIT;
 
-  // Verify root exists and is a directory
   const rootStat = await fs.stat(rootPath).catch(() => null);
   if (!rootStat || !rootStat.isDirectory()) {
     throw new Error(`Corpus root is not a directory: ${rootPath}`);
   }
 
-  // Read each file (skip missing, skip oversized)
   const corpusFiles: CorpusFile[] = [];
   for (const relPath of files) {
     const absPath = path.join(rootPath, relPath);
@@ -81,7 +64,6 @@ export async function readCorpus(opts: ReadCorpusOptions): Promise<Corpus> {
     });
   }
 
-  // Capture git log (best effort)
   const gitLog = await readGitLog(rootPath, gitLogLimit);
   const gitSha = await readGitSha(rootPath);
 
@@ -98,17 +80,16 @@ export async function readCorpus(opts: ReadCorpusOptions): Promise<Corpus> {
   };
 }
 
-/**
- * Run `git log` for the most recent N commits at `rootPath`.
- * Returns null if not a git repo or git is not available.
- */
 export async function readGitLog(
   rootPath: string,
   limit: number,
 ): Promise<readonly GitLogEntry[] | null> {
-  const sep = "\u0000"; // null byte: safe field separator
-  const recordSep = "\u0001"; // SOH: safe record separator
-  const format = ["%H", "%an", "%aI", "%s"].join(sep) + recordSep;
+  // Use git's own %x00 / %x01 escapes so the format argument itself contains
+  // only plain ASCII. Passing literal NUL bytes inside argv fails on POSIX
+  // (argv is NUL-terminated), and Node's execFile would throw silently.
+  const sep = "\u0000";
+  const recordSep = "\u0001";
+  const format = "%H%x00%an%x00%aI%x00%s%x01";
   try {
     const { stdout } = await execFileP(
       "git",
@@ -135,9 +116,6 @@ export async function readGitLog(
   }
 }
 
-/**
- * Read HEAD sha at rootPath. Returns null if not a git repo.
- */
 export async function readGitSha(rootPath: string): Promise<string | null> {
   try {
     const { stdout } = await execFileP("git", ["-C", rootPath, "rev-parse", "HEAD"]);
