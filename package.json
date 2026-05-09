@@ -1,6 +1,6 @@
 {
   "name": "@wytcab/projection-core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Framework primitives for Project Coxswain lenses: lens interface, prompt-template loader, MCP wrapper, and output schemas.",
   "license": "MIT",
   "author": "Vilhelm Drosjer",
